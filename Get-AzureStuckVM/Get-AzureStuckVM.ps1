@@ -1,6 +1,6 @@
 ﻿Param(
 [string]$subscriptionId="",
-[int]$TimeWindow=25
+[int]$TimeWindow=30
 )
 $ErrorActionPreference ="Stop"
 
@@ -14,7 +14,8 @@ if($subscriptionId -eq "")
 }
 Select-AzureSubscription -SubscriptionId $subscriptionId
 #get management certificate thumbprint
-$CertificateThumbprint = (Get-AzureAccount|Where{($_.Type -eq "Certificate") -and ($_.Subscriptions.Contains($subId))}).Id
+$certificatethumbprint = (Get-AzureAccount|Where{($_.Type -eq "Certificate") -and ($_.Subscriptions.Contains($subId))}).Id
+$servicemanagementendpoint = (Get-AzureEnvironment -Name (Get-AzureSubscription -Current).Environment).ServiceManagement
 #get started VM
 $vmList = Get-AzureVM|where{$_.Status -eq "ReadyRole"}
 foreach($vm in $vmList)
@@ -32,9 +33,9 @@ foreach($vm in $vmList)
     $endTime=[System.DateTime]::UtcNow.ToString("o")
     $queryTime="&timeGrain=PT5M&startTime=$startTime&endTime=$endTime"
 
-    $querytemplate = "https://management.core.chinacloudapi.cn/$subscriptionId/services/monitoring/metricvalues/query?resourceId=$query$queryTime"
+    $querytemplate = "$servicemanagementendpoint$subscriptionId/services/monitoring/metricvalues/query?resourceId=$query$queryTime"
     #request metric values
-    $resp = Invoke-RestMethod -Method Get -Uri $querytemplate -CertificateThumbprint $CertificateThumbprint -ContentType "application-json" -Headers @{"x-ms-version"="2013-10-01"}
+    $resp = Invoke-RestMethod -Method Get -Uri $querytemplate -CertificateThumbprint $certificatethumbprint -ContentType "application-json" -Headers @{"x-ms-version"="2013-10-01"}
     #evaluate performance data
     $status = "Running"
     $result=$true
