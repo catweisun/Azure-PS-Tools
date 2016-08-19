@@ -45,55 +45,58 @@ Param(
    [string]$AvailabilitySetName,
 
    [Parameter(Mandatory=$True,Position=2)]
-   [string]$ResourceGroup
+   [string]$ResourceGroup,
+   [Parameter(Mandatory=$False)]
+   [string]$EnvrionmentName = "AzureCloud"
 )
 
 
 #Functions
-Function RunLog-Command([string]$Description, [ScriptBlock]$Command, [string]$LogFile){
-Try{
-$Output = $Description+'  ... '
-Write-Host $Output -ForegroundColor Yellow
-((Get-Date -UFormat "[%d-%m-%Y %H:%M:%S] ") + $Output) | Out-File -FilePath $LogFile -Append -Force
-$Result = Invoke-Command -ScriptBlock $Command 
-}
-Catch {
-$ErrorMessage = $_.Exception.Message
-$Output = 'Error '+$ErrorMessage
-((Get-Date -UFormat "[%d-%m-%Y %H:%M:%S] ") + $Output) | Out-File -FilePath $LogFile -Append -Force
-$Result = ""
-}
-Finally
+Function RunLog-Command([string]$Description, [ScriptBlock]$Command, [string]$LogFile)
 {
-if ($ErrorMessage -eq $null) {$Output = "[Completed]  $Description  ... "} else {$Output = "[Failed]  $Description  ... "}
-((Get-Date -UFormat "[%d-%m-%Y %H:%M:%S] ") + $Output) | Out-File -FilePath $LogFile -Append -Force
-
-}
-Return $Result
-
-
+    Try{
+        $Output = $Description+'  ... '
+        Write-Host $Output -ForegroundColor Yellow
+        ((Get-Date -UFormat "[%d-%m-%Y %H:%M:%S] ") + $Output) | Out-File -FilePath $LogFile -Append -Force
+        $Result = Invoke-Command -ScriptBlock $Command 
+    }
+    Catch {
+        $ErrorMessage = $_.Exception.Message
+        $Output = 'Error '+$ErrorMessage
+        ((Get-Date -UFormat "[%d-%m-%Y %H:%M:%S] ") + $Output) | Out-File -FilePath $LogFile -Append -Force
+        $Result = ""
+    }
+    Finally
+    {
+        if ($ErrorMessage -eq $null) {$Output = "[Completed]  $Description  ... "} else {$Output = "[Failed]  $Description  ... "}
+        ((Get-Date -UFormat "[%d-%m-%Y %H:%M:%S] ") + $Output) | Out-File -FilePath $LogFile -Append -Force
+    }
+    Return $Result
 }
 
 Function LogintoAzure()
-        {
-        $Error_WrongCredentials = $True
-        $AzureAccount = $null
+{
+    $Error_WrongCredentials = $True
+    $AzureAccount = $null
 
-        while ($Error_WrongCredentials) {
+    while ($Error_WrongCredentials) 
+    {
+        Try {
+            Write-Host "Info : Please, Enter the credentials of an Admin account of Azure" -ForegroundColor Cyan
+            #$AzureCredentials = Get-Credential -Message "Please, Enter the credentials of an Admin account of your subscription"      
+            $AzureAccount = Login-AzureRmAccount -EnvironmentName $EnvrionmentName
 
-    Try {
-        Write-Host "Info : Please, Enter the credentials of an Admin account of Azure" -ForegroundColor Cyan
-        #$AzureCredentials = Get-Credential -Message "Please, Enter the credentials of an Admin account of your subscription"      
-        $AzureAccount = Login-AzureRmAccount -EnvironmentName AzureChinaCloud
-
-        if ($AzureAccount.Context.Tenant -eq $null) 
-                  {
-                   $Error_WrongCredentials = $True
-                   $Output = " Warning : The Credentials for [" + $AzureAccount.Context.Account.id +"] are not valid or the user does not have Azure subscriptions "
-                   Write-Host $Output -BackgroundColor Red -ForegroundColor Yellow
-                   } 
-                 else
-                  {$Error_WrongCredentials = $false ; return $AzureAccount}
+            if ($AzureAccount.Context.Tenant -eq $null) 
+            {
+                $Error_WrongCredentials = $True
+                $Output = " Warning : The Credentials for [" + $AzureAccount.Context.Account.id +"] are not valid or the user does not have Azure subscriptions "
+                Write-Host $Output -BackgroundColor Red -ForegroundColor Yellow
+            } 
+            else
+            {
+                $Error_WrongCredentials = $false ; 
+                return $AzureAccount
+            }
         }
 
     Catch {
@@ -112,94 +115,84 @@ Function LogintoAzure()
         }
         
 Function Select-Subscription ($SubscriptionName, $AzureAccount)
-        {
-        Select-AzureRmSubscription -SubscriptionName $SubscriptionName -TenantId $AzureAccount.Context.Tenant.TenantId
-        }
+{
+    Select-AzureRmSubscription -SubscriptionName $SubscriptionName -TenantId $AzureAccount.Context.Tenant.TenantId
+}
 
 Function Set-AsSetting ($VmObject, $AsName, $LogFile)
 {
 
-if ($AsName -eq 0) {
-$VmObject.AvailabilitySetReference = $null
-$VmObject.OSProfile = $null
-$VmObject.StorageProfile.ImageReference = $null
-if ($VmObject.StorageProfile.OsDisk.Image) {$VmObject.StorageProfile.OsDisk.Image = $null}
-$VmObject.StorageProfile.OsDisk.CreateOption = 'Attach'
-for ($s=1;$s -le $VmObject.StorageProfile.DataDisks.Count ; $s++ )
-{
-$VmObject.StorageProfile.DataDisks[$s-1].CreateOption = 'Attach'
-}
-
-
-$Description = "Recreating the Azure VM [$Vmname] : (Step 1 : Removing the VM...) "
-$Command = {Remove-AzureRmVM -Name $VmObject.Name -ResourceGroupName $VmObject.ResourceGroupName -Force | Out-null}
-RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
-
-Start-sleep 5
-
-$Description = "Recreating the Azure VM [$Vmname] : (Step 2 : Creating the VM...) "
-$Command = {New-AzureRmVM -ResourceGroupName $VmObject.ResourceGroupName -Location $VmObject.Location -VM $VmObject | Out-null}
-RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
-
-}
-else
-{
-
-$Description = "Getting the Availability Set : $AsName "
-$Command = {(Get-AzureRmAvailabilitySet -ResourceGroupName $VmObject.ResourceGroupName -Name $ASName).Id}
-$AsId = RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
-$AsObject = New-Object Microsoft.Azure.Management.Compute.Models.SubResource
-$AsObject.Id = $AsId
-$VmObject.AvailabilitySetReference = $AsObject
-$VmObject.OSProfile = $null
-$VmObject.StorageProfile.ImageReference = $null
-if ($VmObject.StorageProfile.OsDisk.Image) {$VmObject.StorageProfile.OsDisk.Image = $null}
-$VmObject.StorageProfile.OsDisk.CreateOption = 'Attach'
-for ($s=1;$s -le $VmObject.StorageProfile.DataDisks.Count ; $s++ )
-{
-$VmObject.StorageProfile.DataDisks[$s-1].CreateOption = 'Attach'
-}
-
-
-$Description = "Recreating the Azure VM [$Vmname] : (Step 1 : Removing the VM...) "
-$Command = {Remove-AzureRmVM -Name $VmObject.Name -ResourceGroupName $VmObject.ResourceGroupName -Force | Out-null}
-RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
-
-Start-sleep 5
-
-$Description = "Recreating the Azure VM [$Vmname] : (Step 2 : Creating the VM...) "
-$Command = {New-AzureRmVM -ResourceGroupName $VmObject.ResourceGroupName -Location $VmObject.Location -VM $VmObject | Out-null}
-RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
-
-}
-
-
-
-
+    if ($AsName -eq 0) {
+        $VmObject.AvailabilitySetReference = $null
+        $VmObject.OSProfile = $null
+        $VmObject.StorageProfile.ImageReference = $null
+        if ($VmObject.StorageProfile.OsDisk.Image) {
+            $VmObject.StorageProfile.OsDisk.Image = $null
+        }
+        $VmObject.StorageProfile.OsDisk.CreateOption = 'Attach'
+        for ($s=1;$s -le $VmObject.StorageProfile.DataDisks.Count ; $s++ )
+        {
+            $VmObject.StorageProfile.DataDisks[$s-1].CreateOption = 'Attach'
+        }
+        $Description = "Recreating the Azure VM [$Vmname] : (Step 1 : Removing the VM...) "
+        $Command = {Remove-AzureRmVM -Name $VmObject.Name -ResourceGroupName $VmObject.ResourceGroupName -Force | Out-null}
+        RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
+        Start-sleep 5
+        $Description = "Recreating the Azure VM [$Vmname] : (Step 2 : Creating the VM...) "
+        $Command = {New-AzureRmVM -ResourceGroupName $VmObject.ResourceGroupName -Location $VmObject.Location -VM $VmObject | Out-null}
+        RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
+    }
+    else
+    {
+        $Description = "Getting the Availability Set : $AsName "
+        $Command = {(Get-AzureRmAvailabilitySet -ResourceGroupName $VmObject.ResourceGroupName -Name $ASName).Id}
+        $AsId = RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
+        $AsObject = New-Object Microsoft.Azure.Management.Compute.Models.SubResource
+        $AsObject.Id = $AsId
+        $VmObject.AvailabilitySetReference = $AsObject
+        $VmObject.OSProfile = $null
+        $VmObject.StorageProfile.ImageReference = $null
+        if ($VmObject.StorageProfile.OsDisk.Image) {
+            $VmObject.StorageProfile.OsDisk.Image = $null
+        }
+        $VmObject.StorageProfile.OsDisk.CreateOption = 'Attach'
+        for ($s=1;$s -le $VmObject.StorageProfile.DataDisks.Count ; $s++ )
+        {
+            $VmObject.StorageProfile.DataDisks[$s-1].CreateOption = 'Attach'
+        }
+        $Description = "Recreating the Azure VM [$Vmname] : (Step 1 : Removing the VM...) "
+        $Command = {Remove-AzureRmVM -Name $VmObject.Name -ResourceGroupName $VmObject.ResourceGroupName -Force | Out-null}
+        RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
+        Start-sleep 5
+        $Description = "Recreating the Azure VM [$Vmname] : (Step 2 : Creating the VM...) "
+        $Command = {New-AzureRmVM -ResourceGroupName $VmObject.ResourceGroupName -Location $VmObject.Location -VM $VmObject | Out-null}
+        RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
+    }
 }
 
 Function Validate-VmExistence ($VmName, $VmRG, $logFile)
 {
-$VmExist = $false
-$Description = "Validating the Vm Existence"
-$Command = {Get-AzureRmVM | where { $_.ResourceGroupName -eq $VmRG -and $_.Name -eq $VmName}}
-$IsExist = RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
-$IsExist = 
-if ($IsExist) {$VmExist = $true}
-
-return $VmExist
+    $VmExist = $false
+    $Description = "Validating the Vm Existence"
+    $Command = {Get-AzureRmVM | where { $_.ResourceGroupName -eq $VmRG -and $_.Name -eq $VmName}}
+    $IsExist = RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
+    $IsExist = 
+    if ($IsExist) {
+        $VmExist = $true
+    }
+    return $VmExist
 }
 
 Function Validate-AsExistence ($ASName, $VmRG, $LogFile)
 {
-$AsExist = $false
-$Description = "Validating the As Existence"
-$Command = {Get-AzureRmAvailabilitySet -ResourceGroupName $VmRG -Name $ASName}
-$IsExist = RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
- 
-if ($IsExist) {$AsExist = $true}
-
-return $AsExist
+    $AsExist = $false
+    $Description = "Validating the As Existence"
+    $Command = {Get-AzureRmAvailabilitySet -ResourceGroupName $VmRG -Name $ASName}
+    $IsExist = RunLog-Command -Description $Description -Command $Command -LogFile $LogFile    
+    if ($IsExist) {
+        $AsExist = $true
+    }
+    return $AsExist
 }
 
 
@@ -233,15 +226,24 @@ RunLog-Command -Description $Description -Command $Command -LogFile $LogFile
 #Validate Input
 
 $ValidateVm = Validate-Vmexistence -VmName $VmName -VmRG $VmRG -logFile $logFile
-if ($ASName -eq 0) {$ValidateAs = $True} else { $ValidateAs = Validate-AsExistence -ASName $ASName -VmRG $VmRG -LogFile $logFile}
+if ($ASName -eq 0) 
+{
+    $ValidateAs = $True
+} 
+else 
+{ 
+    $ValidateAs = Validate-AsExistence -ASName $ASName -VmRG $VmRG -LogFile $logFile
+}
 
 if ($ValidateVm -and $ValidateAs )
-{Write-Output "Validation of [$VmName] and [$ASName] : Success" }
+{
+    Write-Output "Validation of [$VmName] and [$ASName] : Success" 
+}
 else {
-Write-Output "Validation of [$VmName] and [$ASName] : Failed"
-Write-Output "Validation of [$VmName] : $ValidateVm"
-Write-Output "Validation of [$ASName] : $ValidateAs"
-Return
+    Write-Output "Validation of [$VmName] and [$ASName] : Failed"
+    Write-Output "Validation of [$VmName] : $ValidateVm"
+    Write-Output "Validation of [$ASName] : $ValidateAs"
+    Return
 }
 
 #
